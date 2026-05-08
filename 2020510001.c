@@ -15,7 +15,6 @@
  *   5. Index-only traversal and search
  *   6. Insert-product flow with pointer recalculation
  *   7. Interactive console UI
- *   8. Self-test harness (menu option [9])
  */
 
 #include <ctype.h>
@@ -204,11 +203,8 @@ static void productRecordListRelease(ProductRecordList *list) {
 
 /* ===========================================================================
  * Section 3 - JSON loader
- *
- * The course-provided JsonParse.c demonstrates the json-c API; this loader
- * uses the same idioms (json_object_object_get_ex, json_object_array_*) but
- * walks the specific schema of Assignment -2.json: an array of countries,
- * each with cities[], each city with products[].
+ * Walks the schema: array of countries, each with cities[], each city with
+ * products[]. Uses the same json-c idioms shown in the course JsonParse.c.
  * ======================================================================== */
 
 /* Read a string field from a json object, write into a fixed buffer.
@@ -356,13 +352,10 @@ static bool loadProductRecordsFromJsonFile(const char *jsonFilePath,
 /* ===========================================================================
  * Section 2 - Replacement Selection Sort with run merge
  *
- * The classic external-sort algorithm: a min-heap of fixed capacity holds
- * a sliding window over the input. Items larger than the last emitted value
- * stay in the active heap and feed the current run; items smaller are
- * "frozen" at the back of the buffer and become the seed of the next run.
- *
- * After all runs are produced, we run a k-way merge using another min-heap
- * (of run heads) to obtain the fully sorted output.
+ * Min-heap of fixed capacity slides over the input: items >= last emitted
+ * value feed the current run; items < last emitted are frozen at the back
+ * of the buffer and seed the next run. A k-way merge over the produced
+ * runs yields the final sorted output.
  * ======================================================================== */
 
 /* Push the value at `heapBuffer[startIndex]` down so the subtree rooted there
@@ -446,22 +439,13 @@ static void printHeapStateForTrace(char **heapBuffer,
     printf("\n");
 }
 
-/* Run the Replacement Selection Sort over the given input strings, populating
- * `outRuns->runs` with one StringRun per produced run. The runs collectively
- * own the same string pointers that came in (no duplication).
- *
- * The buffer is partitioned into three zones during execution:
- *   active heap : slots [0, activeHeapSize)
- *   drained gap : slots [activeHeapSize, frozenSectionStart)  - stale, ignore
- *   frozen tail : slots [frozenSectionStart, frozenSectionEnd) - next run seeds
- *
- * "Replace" (next input >= last emitted) keeps the active heap size unchanged.
- * "Freeze" (next input < last emitted) shrinks active by one and grows the
- * frozen tail by one (frozenSectionStart decreases). "Drain" (no more input)
- * shrinks active by one only and leaves a gap above it.
- *
- * When activeHeapSize hits 0 we emit the run, compact the frozen tail down to
- * the start of the buffer, and re-heapify it as the seed of the next run. */
+/* Run Replacement Selection Sort over the input strings, producing one run
+ * per output entry in `outRuns`. Buffer layout during execution:
+ *   active heap : [0, activeHeapSize)
+ *   drained gap : [activeHeapSize, frozenSectionStart)
+ *   frozen tail : [frozenSectionStart, frozenSectionEnd)  - next run seeds
+ * When activeHeapSize hits 0 the run is emitted, the frozen tail compacts
+ * down to the front of the buffer, and the next run reseeds from it. */
 static void replacementSelectionSortStrings(char **inputStrings, size_t inputCount,
                                             size_t heapCapacity, bool printTrace,
                                             StringRunCollection *outRuns) {
@@ -669,11 +653,9 @@ static char **extractDistinctStringsInEncounterOrder(char **strings, size_t coun
     return distinct;
 }
 
-/* Build the Country Index by extracting distinct country names from the
- * loaded product list, sorting them via Replacement Selection Sort + run
- * merge, and writing them physically sorted into `country_index.dat`. The
- * `firstCityRowOffset` field is initialised to -1 here and patched later
- * by Phase 3 once the City Index exists. */
+/* Build the Country Index: extract distinct country names, sort via RSS +
+ * run merge, write physically sorted to country_index.dat. firstCityRowOffset
+ * is initialised to -1 and patched later when the City Index is built. */
 static void buildAndWriteCountryIndexFile(const ProductRecordList *productList,
                                           const char *countryIndexFilePath) {
     char **countryNamesInEncounterOrder = calloc(productList->count, sizeof(char *));
@@ -723,17 +705,10 @@ static void buildAndWriteCountryIndexFile(const ProductRecordList *productList,
 
 /* ===========================================================================
  * Section 4 - City Index
- *
- * For every country (in the order written to the country index) we collect
- * distinct city names in JSON encounter order, append a CityIndexEntry per
- * city to city_index.dat, then patch:
- *   1. each country entry's `firstCityRowOffset` to point at the
- *      alphabetically-first city of that country;
- *   2. each city's `nextCityRowOffset` to form an alphabetical linked list
- *      that ends with the END_OF_LIST_SENTINEL.
- *
- * The physical order in city_index.dat purposely differs from alphabetical
- * order - this is the exact pattern shown in the PDF example.
+ * For every country we collect distinct cities in JSON encounter order,
+ * append CityIndexEntry rows, then patch (1) the country's firstCityRowOffset
+ * and (2) each nextCityRowOffset to form the alphabetical linked list. The
+ * physical order intentionally differs from alphabetical (PDF example).
  * ======================================================================== */
 
 static long findCityRowNumberByName(CityIndexEntry *cityEntries, size_t cityCount,
@@ -890,19 +865,10 @@ static void buildAndWriteCityIndexFile(const ProductRecordList *productList,
 
 /* ===========================================================================
  * Section 4b - Product Index + data file (Level 3 + Level 4)
- *
- * For every city (in physical row order in city_index.dat) we:
- *   1. Collect the products belonging to that city in JSON encounter order;
- *   2. Append every ProductRecord to products.dat (Level 4), recording its
- *      byte offset;
- *   3. Append a ProductIndexEntry to product_index.dat for each product, in
- *      the same order, with the byte offset above as `dataFileRecordOffset`
- *      and `nextProductRowOffset = -1`;
- *   4. Sort the product names alphabetically with RSS + run merge;
- *   5. Patch `nextProductRowOffset` to form the alphabetical chain and set
- *      the city's `firstProductRowOffset` to the alphabetically first row.
- * Finally we rewrite city_index.dat so its firstProductRowOffset values are
- * persistent.
+ * For each city: append every ProductRecord to products.dat (capturing the
+ * byte offset), append a matching ProductIndexEntry to product_index.dat,
+ * then sort the products alphabetically with RSS + run merge and splice the
+ * nextProductRowOffset chain plus the city's firstProductRowOffset.
  * ======================================================================== */
 
 static long findProductRowNumberByName(ProductIndexEntry *productEntries, size_t productCount,
@@ -1075,11 +1041,9 @@ static void buildAndWriteProductIndexAndDataFile(const ProductRecordList *produc
 
 /* ===========================================================================
  * Section 5 - Index-only access session, search and traversal
- *
- * Holds open FILE * handles for the four binary files plus their entry counts.
- * Every read goes through one of the readXxxAt(...) helpers so tests can
- * count exactly how many records were touched - this is how we prove that
- * search operations never perform a full linear scan of products.dat.
+ * Holds open FILE * handles for the four binary files plus their counts.
+ * Every read goes through readXxxAt(...) helpers, and dataFileReadCount lets
+ * us prove that searches never perform a linear scan of products.dat.
  * ======================================================================== */
 
 typedef struct {
@@ -1403,16 +1367,10 @@ static void displayProductIndexAlphabeticalPerCity(IndexAccessSession *session) 
 
 /* ===========================================================================
  * Section 6 - Insert a new product (Task 5)
- *
- * The PDF "Inserting Product A into Berlin" example dictates the behaviour:
- *   - Append the new product record physically to the end of products.dat;
- *   - Append a new ProductIndexEntry physically to the end of the product
- *     index, with dataFileRecordOffset pointing at the new record;
- *   - Walk the target city's alphabetical product chain to find the correct
- *     insertion slot, then splice the new row in by adjusting the
- *     predecessor's nextProductRowOffset and (when needed) the city's
- *     firstProductRowOffset;
- *   - Existing physical positions of D, E, etc. are NEVER moved.
+ * Mirrors the PDF "Inserting Product A into Berlin" example: append the
+ * record physically to products.dat and the entry to product_index.dat,
+ * then splice it into the alphabetical chain by editing pointers only.
+ * Existing rows are never physically moved.
  * ======================================================================== */
 
 typedef enum {
@@ -1657,83 +1615,6 @@ static void demonstrateReplacementSelectionSortOnCountries(const char *jsonInput
     productRecordListRelease(&productList);
 }
 
-/* Embedded self-tests (a condensed mirror of tests.c) so the grader can
- * verify correctness from the submitted file alone. */
-static int runEmbeddedSelfTests(IndexAccessSession *session) {
-    int passed = 0, total = 0;
-    #define EMBED_CHECK(label, condition)                                    \
-        do {                                                                  \
-            total += 1;                                                       \
-            bool conditionResult = (condition);                              \
-            printf("  %s : %s\n", conditionResult ? "PASS" : "FAIL", label); \
-            if (conditionResult) passed += 1;                                \
-        } while (0)
-
-    EMBED_CHECK("country index has 10 entries",  session->countryEntryCount == 10);
-    EMBED_CHECK("city index has 80 entries",     session->cityEntryCount    == 80);
-    EMBED_CHECK("product index has >= 800 entries", session->productEntryCount >= 800);
-
-    /* Verify Country Index is alphabetically sorted. */
-    {
-        bool ascending = true;
-        char previousName[MAX_COUNTRY_NAME_LENGTH] = "";
-        for (long row = 1; (size_t)row <= session->countryEntryCount; row++) {
-            CountryIndexEntry entry;
-            readCountryEntryAtRow(session, row, &entry);
-            if (row > 1 && strcmp(previousName, entry.countryName) > 0) ascending = false;
-            copyStringIntoFixedBuffer(previousName, sizeof(previousName), entry.countryName);
-        }
-        EMBED_CHECK("country index is alphabetically sorted", ascending);
-    }
-
-    /* Verify every city's product chain is alphabetical. */
-    {
-        bool allAlphabetical = true;
-        for (long cityRow = 1; (size_t)cityRow <= session->cityEntryCount; cityRow++) {
-            CityIndexEntry cityEntry;
-            readCityEntryAtRow(session, cityRow, &cityEntry);
-            long currentRow = cityEntry.firstProductRowOffset;
-            char previousName[MAX_PRODUCT_NAME_LENGTH] = "";
-            bool firstStep = true;
-            while (currentRow != END_OF_LIST_SENTINEL) {
-                ProductIndexEntry productEntry;
-                readProductEntryAtRow(session, currentRow, &productEntry);
-                if (!firstStep && strcmp(previousName, productEntry.productName) > 0) {
-                    allAlphabetical = false;
-                    break;
-                }
-                copyStringIntoFixedBuffer(previousName, sizeof(previousName),
-                                          productEntry.productName);
-                firstStep   = false;
-                currentRow  = productEntry.nextProductRowOffset;
-            }
-        }
-        EMBED_CHECK("every city's product chain is alphabetical", allAlphabetical);
-    }
-
-    /* Verify product index entries point at the matching data records. */
-    {
-        bool allMatch = true;
-        size_t toCheck = session->productEntryCount < 50 ? session->productEntryCount : 50;
-        for (long productRow = 1; (size_t)productRow <= toCheck; productRow++) {
-            ProductIndexEntry productEntry;
-            readProductEntryAtRow(session, productRow, &productEntry);
-            ProductRecord record;
-            readDataRecordAtByteOffset(session, productEntry.dataFileRecordOffset, &record);
-            if (strcmp(record.productName,    productEntry.productName)    != 0 ||
-                strcmp(record.cityName,       productEntry.owningCityName) != 0) {
-                allMatch = false;
-                break;
-            }
-        }
-        EMBED_CHECK("product index entries reference correct .dat records", allMatch);
-    }
-
-    #undef EMBED_CHECK
-    printf("\n  %d / %d embedded self-tests passed\n", passed, total);
-    return (passed == total) ? 0 : 1;
-}
-
 /* Print the menu and read one option character. Returns the chosen digit
  * or -1 on EOF. */
 static int promptForMenuChoice(void) {
@@ -1746,7 +1627,6 @@ static int promptForMenuChoice(void) {
     printf("[6] Display Product Index (alphabetical traversal per city)\n");
     printf("[7] Insert a new product\n");
     printf("[8] Apply Replacement Selection Sort step-by-step (Country Index)\n");
-    printf("[9] Run self-tests\n");
     printf("[0] Exit\n");
     printf("===========================================================\n");
     printf("Choose an option: ");
@@ -1861,9 +1741,8 @@ static void runInteractiveMenuLoop(IndexAccessSession *session, const char *json
             case 6:  displayProductIndexAlphabeticalPerCity(session); break;
             case 7:  runMenuOptionInsertProduct(session);   break;
             case 8:  demonstrateReplacementSelectionSortOnCountries(jsonInputPath); break;
-            case 9:  runEmbeddedSelfTests(session);         break;
             case 0:  printf("Goodbye.\n"); return;
-            default: printf("Unknown option. Please choose a number 0-9.\n"); break;
+            default: printf("Unknown option. Please choose a number 0-8.\n"); break;
         }
     }
 }
